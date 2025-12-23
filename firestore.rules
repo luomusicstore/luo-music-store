@@ -1,0 +1,133 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    function isAdminEmail() {
+      return isSignedIn() && 
+             (request.auth.token.email == 'mainplatform.nexus@gmail.com' || 
+              request.auth.token.email == 'lightstarrecord@gmail.com');
+    }
+    
+    function isSuperAdmin() {
+      return isSignedIn() && 
+             request.auth.token.email == 'mainplatform.nexus@gmail.com';
+    }
+    
+    function hasActiveSubscription() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.subscription.isActive == true &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.subscription.endDate > request.time;
+    }
+    
+    // Helper function to check if only updating viewCount, likesCount, or duration fields
+    function isOnlyUpdatingStats() {
+      let affectedKeys = request.resource.data.diff(resource.data).affectedKeys();
+      return affectedKeys.hasOnly(['viewCount']) || 
+             affectedKeys.hasOnly(['likesCount']) || 
+             affectedKeys.hasOnly(['duration']) ||
+             affectedKeys.hasOnly(['views']) ||
+             affectedKeys.hasOnly(['viewCount', 'likesCount']) ||
+             affectedKeys.hasOnly(['viewCount', 'duration']) ||
+             affectedKeys.hasOnly(['viewCount', 'views']) ||
+             affectedKeys.hasOnly(['likesCount', 'duration']) ||
+             affectedKeys.hasOnly(['likesCount', 'views']) ||
+             affectedKeys.hasOnly(['duration', 'views']) ||
+             affectedKeys.hasOnly(['viewCount', 'likesCount', 'duration']) ||
+             affectedKeys.hasOnly(['viewCount', 'likesCount', 'views']) ||
+             affectedKeys.hasOnly(['viewCount', 'duration', 'views']) ||
+             affectedKeys.hasOnly(['likesCount', 'duration', 'views']) ||
+             affectedKeys.hasOnly(['viewCount', 'likesCount', 'duration', 'views']);
+    }
+    
+    // Users collection - users can read their own data
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if (isSignedIn() && request.auth.uid == userId) || isAdminEmail();
+      allow delete: if isAdminEmail();
+    }
+    
+    match /adminPasswords/{passwordId} {
+      allow read, write: if isSignedIn() && (
+        request.auth.token.email == 'lightstarrecord@gmail.com' ||
+        request.auth.token.email == 'mainplatform.nexus@gmail.com'
+      );
+    }
+    
+    match /subscriptions/{subscriptionId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdminEmail());
+      allow create: if isSignedIn();
+      allow update, delete: if isAdminEmail();
+    }
+    
+    // Content collection (music, movies, images)
+    match /content/{contentId} {
+      allow read: if true;
+      allow create: if isAdminEmail();
+      allow update: if isAdminEmail() || (isSignedIn() && isOnlyUpdatingStats());
+      allow delete: if isAdminEmail();
+    }
+    
+    // Videos collection
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create: if isAdminEmail();
+      allow update: if isAdminEmail();
+      allow delete: if isAdminEmail();
+    }
+    
+    // Wallet collection
+    match /wallet/{walletId} {
+      allow read: if isAdminEmail();
+      allow write: if isAdminEmail() || isSignedIn();
+    }
+    
+    // Transactions collection
+    match /transactions/{transactionId} {
+      allow read: if isAdminEmail();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdminEmail();
+    }
+    
+    // User favorites/saved items
+    match /favorites/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // User likes
+    match /likes/{likeId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+    
+    // News collection
+    match /news/{newsId} {
+      allow read: if true; // Anyone can read news
+      allow create: if isAdminEmail(); // Only admins can create news
+      allow update: if isAdminEmail() || (isSignedIn() && isOnlyUpdatingStats()); // Admins or users updating stats (views)
+      allow delete: if isAdminEmail(); // Only admins can delete news
+    }
+    
+    // Comments (if you add this feature later)
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && 
+                            (resource.data.userId == request.auth.uid || isAdminEmail());
+    }
+  }
+}
